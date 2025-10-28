@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
 
     DB_URL: str = Field(
-        "postgresql://postgres:postgres@localhost/hirehub",
+        "postgresql://ak_user:navat@localhost/ak_db",
         env="DB_URL",
     )
     # Microsoft Graph / Azure AD configuration (optional)

@@ -64,6 +64,10 @@ jobs:
             sudo tar -xzf /tmp/backend.tar.gz -C ${APP_DIR}
             sudo rm -f /tmp/backend.tar.gz
 
+            echo "🔧 Fixing permissions..."
+            sudo chown -R ubuntu:www-data ${APP_DIR}
+            sudo chmod -R 775 ${APP_DIR}
+
             echo "🐍 Setting up virtual environment..."
             cd ${APP_DIR}
             if [ ! -d "venv" ]; then

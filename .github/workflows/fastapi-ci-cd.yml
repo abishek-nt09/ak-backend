@@ -1,91 +1,77 @@
-name: Backend Deployment
+name: Deploy FastAPI Backend to EC2
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  # 1️⃣ Copy project files to EC2
-  copy-to-ec2:
+  deploy:
+    name: Deploy Backend to EC2
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout latest code
         uses: actions/checkout@v4
 
-      - name: Copy backend code to EC2
-        env:
-          PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          HOST: ${{ secrets.EC2_HOST }}
-          USER: ${{ secrets.EC2_USER }}
-        run: |
-          echo "$PRIVATE_KEY" > private_key.pem
-          chmod 600 private_key.pem
+      - name: Copy backend files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "./"
+          target: "/var/www/ats/backend"
 
-          echo "📦 Copying backend files to EC2..."
-          scp -o StrictHostKeyChecking=no -i private_key.pem -r ./ ${USER}@${HOST}:/home/${USER}/backend-temp
-
-  # 2️⃣ Deploy backend inside EC2
-  deploy-backend:
-    runs-on: ubuntu-latest
-    needs: copy-to-ec2
-
-    steps:
-      - name: Deploy to EC2
-        env:
-          PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          HOST: ${{ secrets.EC2_HOST }}
-          USER: ${{ secrets.EC2_USER }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASS: ${{ secrets.DB_PASS }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_MAILBOX: ${{ secrets.AZURE_MAILBOX }}
-        run: |
-          echo "$PRIVATE_KEY" > private_key.pem
-          chmod 600 private_key.pem
-
-          echo "🚀 Connecting to EC2 and deploying backend..."
-          ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} <<EOF
+      - name: Configure backend and restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
             set -e
+            echo "🚀 Starting backend deployment..."
 
-            echo "📂 Moving files to /var/www/ats/backend..."
-            sudo rm -rf /var/www/ats/backend
-            sudo mkdir -p /var/www/ats/backend
-            sudo cp -r /home/${USER}/backend-temp/* /var/www/ats/backend/
-            sudo chown -R ${USER}:www-data /var/www/ats/backend
+            APP_DIR="/var/www/ats/backend"
+            cd $APP_DIR
 
-            cd /var/www/ats/backend
+            echo "🔐 Creating .env file dynamically..."
+            cat > .env <<EOF
+            FRONTEND_HOST="http://${{ secrets.EC2_HOST }}"
+            ENVIRONMENT="production"
+            BACKEND_CORS_ORIGINS="http://${{ secrets.EC2_HOST }}"
+            SECRET_KEY="${{ secrets.SECRET_KEY }}"
+            DATABASE_URL="postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASS }}@localhost/${{ secrets.DB_NAME }}"
+            AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}"
+            AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}"
+            AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}"
+            AZURE_MAILBOX="${{ secrets.AZURE_MAILBOX }}"
+            EOF
 
             echo "🐍 Setting up Python virtual environment..."
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
+
             source venv/bin/activate
-            pip install --upgrade pip
-            pip install -r requirements.txt
+            pip install --upgrade pip --quiet
 
-            echo "🔐 Creating .env file..."
-            cat > .env <<EOF2
-            FRONTEND_HOST="http://${HOST}"
-            ENVIRONMENT="production"
-            BACKEND_CORS_ORIGINS="http://${HOST}"
-            SECRET_KEY="${SECRET_KEY}"
-            DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost/${DB_NAME}"
-            AZURE_TENANT_ID="${AZURE_TENANT_ID}"
-            AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
-            AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
-            AZURE_MAILBOX="${AZURE_MAILBOX}"
-            EOF2
+            echo "📦 Installing dependencies..."
+            if [ -f requirements.txt ]; then
+              pip install --no-cache-dir -r requirements.txt --quiet
+            fi
 
-            echo "🔁 Reloading and starting FastAPI service..."
+            echo "⚙️ Running Alembic migrations if available..."
+            if [ -d "alembic" ]; then
+              alembic upgrade head || echo "No migrations found."
+            fi
+
+            echo "🔁 Reloading and restarting FastAPI service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi
             sudo systemctl restart fastapi
 
-            echo "✅ Backend deployment complete!"
-          EOF
+            echo "✅ Backend deployed successfully!"

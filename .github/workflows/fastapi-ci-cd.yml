@@ -71,7 +71,7 @@ jobs:
             pip install -r requirements.txt
 
             echo "🔐 Creating .env file..."
-            cat > .env << ENV
+            cat > .env <<EOF
             FRONTEND_HOST="http://${HOST}"
             ENVIRONMENT="production"
             BACKEND_CORS_ORIGINS="http://${HOST}"
@@ -81,12 +81,13 @@ jobs:
             AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
             AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
             AZURE_MAILBOX="${AZURE_MAILBOX}"
-            ENV
-
+            EOF
+            
             echo "🔁 Reloading and starting FastAPI service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi
             sudo systemctl restart fastapi
-
+            
             echo "✅ Backend deployment complete!"
+
           '

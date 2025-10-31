@@ -1,4 +1,4 @@
-name: Deploy Backend
+name: Backend Deployment
 
 on:
   push:
@@ -6,14 +6,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  upload-backend:
+  # 1️⃣ Copy project files to EC2
+  copy-to-ec2:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy Backend Code to EC2 (excluding .git)
+      - name: Copy backend code to EC2
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -22,18 +23,16 @@ jobs:
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
 
-          echo "📦 Copying backend files to EC2 (skipping .git & .github)..."
-          rsync -avz --exclude '.git' --exclude '.github' --exclude '.venv' \
-            -e "ssh -o StrictHostKeyChecking=no -i private_key.pem" ./ ${USER}@${HOST}:/home/${USER}/backend-temp
-          
-          echo "✅ Files uploaded successfully."
+          echo "📦 Copying backend files to EC2..."
+          scp -o StrictHostKeyChecking=no -i private_key.pem -r ./ ${USER}@${HOST}:/home/${USER}/backend-temp
 
+  # 2️⃣ Deploy backend inside EC2
   deploy-backend:
-    needs: upload-backend
     runs-on: ubuntu-latest
+    needs: copy-to-ec2
 
     steps:
-      - name: Deploy on EC2
+      - name: Deploy to EC2
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -50,28 +49,28 @@ jobs:
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
 
-          echo "🚀 Connecting to EC2 to deploy backend..."
-          ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} '
+          echo "🚀 Connecting to EC2 and deploying backend..."
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} <<EOF
             set -e
-            APP_DIR="/var/www/ats/backend"
 
-            echo "🧹 Cleaning old backend files..."
-            sudo rm -rf $APP_DIR
-            sudo mkdir -p $APP_DIR
+            echo "📂 Moving files to /var/www/ats/backend..."
+            sudo rm -rf /var/www/ats/backend
+            sudo mkdir -p /var/www/ats/backend
+            sudo cp -r /home/${USER}/backend-temp/* /var/www/ats/backend/
+            sudo chown -R ${USER}:www-data /var/www/ats/backend
 
-            echo "📂 Moving uploaded files into place..."
-            sudo mv /home/${USER}/backend-temp/* $APP_DIR/
-            sudo chown -R ${USER}:www-data $APP_DIR
-            cd $APP_DIR
+            cd /var/www/ats/backend
 
-            echo "🐍 Creating virtual environment..."
-            python3 -m venv venv
+            echo "🐍 Setting up Python virtual environment..."
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
             source venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
 
             echo "🔐 Creating .env file..."
-            cat > .env <<EOF
+            cat > .env <<EOF2
             FRONTEND_HOST="http://${HOST}"
             ENVIRONMENT="production"
             BACKEND_CORS_ORIGINS="http://${HOST}"
@@ -81,13 +80,12 @@ jobs:
             AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
             AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
             AZURE_MAILBOX="${AZURE_MAILBOX}"
-            EOF
-            
+            EOF2
+
             echo "🔁 Reloading and starting FastAPI service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi
             sudo systemctl restart fastapi
-            
-            echo "✅ Backend deployment complete!"
 
-          '
+            echo "✅ Backend deployment complete!"
+          EOF

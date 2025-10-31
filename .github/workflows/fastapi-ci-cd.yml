@@ -37,11 +37,14 @@ jobs:
             BACKUP_DIR="/var/www/ats-backups/backend"
             APP_DIR="/var/www/ats/backend"
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-            sudo mkdir -p $BACKUP_DIR
 
+            echo "📦 Taking database backup..."
+            sudo mkdir -p $BACKUP_DIR
             export PGPASSWORD="${DB_PASS}"
             pg_dump -U ${DB_USER} -h localhost ${DB_NAME} | gzip > $BACKUP_DIR/pre_deploy_${TIMESTAMP}.sql.gz
+            echo "✅ Backup completed: pre_deploy_${TIMESTAMP}.sql.gz"
 
+            echo "📁 Cloning or updating backend repository..."
             cd /var/www/ats
             if [ ! -d "backend/.git" ]; then
               git clone https://github.com/abishek-nt09/ak-backend.git backend
@@ -51,7 +54,7 @@ jobs:
             git reset --hard
             git pull origin main
 
-            # Create virtual environment if missing
+            echo "🐍 Setting up virtual environment..."
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
@@ -60,25 +63,47 @@ jobs:
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            # Create .env file dynamically
-            cat > .env << ENV
-            FRONTEND_HOST="http://${HOST}"
-            ENVIRONMENT="production"
-            BACKEND_CORS_ORIGINS="http://${HOST}"
-            SECRET_KEY="${SECRET_KEY}"
-            DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost/${DB_NAME}"
-            AZURE_TENANT_ID="${AZURE_TENANT_ID}"
-            AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
-            AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
-            AZURE_MAILBOX="${AZURE_MAILBOX}"
-            ENV
+            echo "🧩 Creating .env file..."
+            cat > .env <<EOF
+              FRONTEND_HOST="http://${HOST}"
+              ENVIRONMENT="production"
+              BACKEND_CORS_ORIGINS="http://${HOST}"
+              SECRET_KEY="${SECRET_KEY}"
+              DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost/${DB_NAME}"
+              AZURE_TENANT_ID="${AZURE_TENANT_ID}"
+              AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
+              AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
+              AZURE_MAILBOX="${AZURE_MAILBOX}"
+              EOF
 
-            alembic upgrade head
+            echo "⚙️ Setting up FastAPI systemd service..."
+            sudo tee /etc/systemd/system/fastapi.service > /dev/null <<SERVICE
+              [Unit]
+              Description=FastAPI Backend
+              After=network.target
+              
+              [Service]
+              User=ubuntu
+              Group=www-data
+              WorkingDirectory=/var/www/ats/backend
+              EnvironmentFile=/var/www/ats/backend/.env
+              ExecStart=/var/www/ats/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+              Restart=always
+              StandardOutput=append:/var/log/fastapi.log
+              StandardError=append:/var/log/fastapi.log
+              
+              [Install]
+              WantedBy=multi-user.target
+              SERVICE
+
+            echo "🔁 Enabling and restarting FastAPI service..."
+            sudo systemctl daemon-reload
+            sudo systemctl enable fastapi
             sudo systemctl restart fastapi
 
-            # Keep only last 3 backups
+            echo "🧹 Cleaning up old backups (keeping 3 latest)..."
             cd $BACKUP_DIR
             ls -t pre_deploy_*.sql.gz | tail -n +4 | xargs -r rm
 
-            echo "✅ Backend deployed successfully!"
+            echo "✅ Backend deployed successfully at $(date)!"
           EOF

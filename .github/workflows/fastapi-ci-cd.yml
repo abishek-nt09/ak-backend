@@ -37,39 +37,39 @@ jobs:
           scp -i private_key.pem -o StrictHostKeyChecking=no backend.tar.gz ${USER}@${HOST}:/tmp/
 
           echo "🚀 Connecting to EC2 and deploying..."
-          ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} << EOF
             set -e
             APP_DIR="/var/www/ats/backend"
             BACKUP_DIR="/var/www/ats-backups/backend"
-            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            TIMESTAMP=\$(date +%Y%m%d_%H%M%S)
 
             echo "🧱 Creating backup directory..."
-            sudo mkdir -p ${BACKUP_DIR}
+            sudo mkdir -p \${BACKUP_DIR}
 
             echo "📂 Creating code backup..."
-            if [ -d "${APP_DIR}" ]; then
-              sudo tar -czf ${BACKUP_DIR}/backend_backup_${TIMESTAMP}.tar.gz -C /var/www/ats backend
-              echo "✅ Backup created at ${BACKUP_DIR}/backend_backup_${TIMESTAMP}.tar.gz"
+            if [ -d "\${APP_DIR}" ]; then
+              sudo tar -czf \${BACKUP_DIR}/backend_backup_\${TIMESTAMP}.tar.gz -C /var/www/ats backend
+              echo "✅ Backup created at \${BACKUP_DIR}/backend_backup_\${TIMESTAMP}.tar.gz"
             else
               echo "⚠️ No existing backend folder, skipping backup..."
             fi
 
             echo "📂 Cleaning old backups (keeping 3 latest)..."
-            cd ${BACKUP_DIR}
+            cd \${BACKUP_DIR}
             ls -t backend_backup_*.tar.gz | tail -n +4 | xargs -r rm || true
 
             echo "🔄 Deploying new backend code..."
-            sudo rm -rf ${APP_DIR}
-            sudo mkdir -p ${APP_DIR}
-            sudo tar -xzf /tmp/backend.tar.gz -C ${APP_DIR}
+            sudo rm -rf \${APP_DIR}
+            sudo mkdir -p \${APP_DIR}
+            sudo tar -xzf /tmp/backend.tar.gz -C \${APP_DIR}
             sudo rm -f /tmp/backend.tar.gz
 
             echo "🔧 Fixing permissions..."
-            sudo chown -R ubuntu:www-data ${APP_DIR}
-            sudo chmod -R 775 ${APP_DIR}
+            sudo chown -R ubuntu:www-data \${APP_DIR}
+            sudo chmod -R 775 \${APP_DIR}
 
             echo "🐍 Setting up virtual environment..."
-            cd ${APP_DIR}
+            cd \${APP_DIR}
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
@@ -78,7 +78,7 @@ jobs:
             pip install -r requirements.txt
 
             echo "🧩 Creating .env file..."
-            cat > .env << ENV
+            cat <<EOT | sudo tee \${APP_DIR}/.env > /dev/null
             FRONTEND_HOST="http://${HOST}"
             ENVIRONMENT="production"
             BACKEND_CORS_ORIGINS="http://${HOST}"
@@ -88,11 +88,11 @@ jobs:
             AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
             AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
             AZURE_MAILBOX="${AZURE_MAILBOX}"
-            ENV
+            EOT
 
             echo "🔁 Restarting FastAPI systemd service..."
             sudo systemctl daemon-reload
             sudo systemctl restart fastapi
 
-            echo "✅ Backend deployed successfully at $(date)!"
+            echo "✅ Backend deployed successfully at \$(date)!"
           EOF

@@ -1,4 +1,4 @@
-name: FastAPI CI/CD Pipeline
+name: FastAPI Backend Deployment
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy backend to EC2
+      - name: Deploy Backend to EC2
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -34,76 +34,54 @@ jobs:
             set -e
             echo "🚀 Starting backend deployment..."
 
-            BACKUP_DIR="/var/www/ats-backups/backend"
             APP_DIR="/var/www/ats/backend"
+            BACKUP_DIR="/var/www/ats-backups/backend"
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-            echo "📦 Taking database backup..."
-            sudo mkdir -p $BACKUP_DIR
+            echo "🧠 Taking pre-deployment database backup..."
             export PGPASSWORD="${DB_PASS}"
-            pg_dump -U ${DB_USER} -h localhost ${DB_NAME} | gzip > $BACKUP_DIR/pre_deploy_${TIMESTAMP}.sql.gz
-            echo "✅ Backup completed: pre_deploy_${TIMESTAMP}.sql.gz"
+            sudo -u postgres pg_dump -U ${DB_USER} -h localhost ${DB_NAME} | gzip > ${BACKUP_DIR}/pre_deploy_${TIMESTAMP}.sql.gz
 
-            echo "📁 Cloning or updating backend repository..."
-            cd /var/www/ats
-            if [ ! -d "backend/.git" ]; then
-              git clone https://github.com/abishek-nt09/ak-backend.git backend
+            echo "📦 Pulling latest backend code..."
+            if [ ! -d "${APP_DIR}/.git" ]; then
+              sudo rm -rf ${APP_DIR}
+              git clone https://github.com/abishek-nt09/ak-backend.git ${APP_DIR}
             fi
-            cd backend
-
+            cd ${APP_DIR}
             git reset --hard
             git pull origin main
 
-            echo "🐍 Setting up virtual environment..."
+            echo "🐍 Setting up Python virtual environment..."
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
             source venv/bin/activate
 
+            echo "📦 Installing dependencies..."
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            echo "🧩 Creating .env file..."
-            cat > .env <<EOF
-              FRONTEND_HOST="http://${HOST}"
-              ENVIRONMENT="production"
-              BACKEND_CORS_ORIGINS="http://${HOST}"
-              SECRET_KEY="${SECRET_KEY}"
-              DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost/${DB_NAME}"
-              AZURE_TENANT_ID="${AZURE_TENANT_ID}"
-              AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
-              AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
-              AZURE_MAILBOX="${AZURE_MAILBOX}"
-              EOF'
+            echo "⚙️ Creating .env file..."
+            cat > .env << ENV
+            FRONTEND_HOST="http://${HOST}"
+            ENVIRONMENT="production"
+            BACKEND_CORS_ORIGINS="http://${HOST}"
+            SECRET_KEY="${SECRET_KEY}"
+            DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost/${DB_NAME}"
+            AZURE_TENANT_ID="${AZURE_TENANT_ID}"
+            AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
+            AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
+            AZURE_MAILBOX="${AZURE_MAILBOX}"
+            ENV
 
-            echo "⚙️ Setting up FastAPI systemd service..."
-            sudo tee /etc/systemd/system/fastapi.service > /dev/null <<SERVICE
-              [Unit]
-              Description=FastAPI Backend
-              After=network.target
-              
-              [Service]
-              User=ubuntu
-              Group=www-data
-              WorkingDirectory=/var/www/ats/backend
-              EnvironmentFile=/var/www/ats/backend/.env
-              ExecStart=/var/www/ats/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-              Restart=always
-              StandardOutput=append:/var/log/fastapi.log
-              StandardError=append:/var/log/fastapi.log
-              
-              [Install]
-              WantedBy=multi-user.target
-              SERVICE'
-
-            echo "🔁 Enabling and restarting FastAPI service..."
+            echo "🔄 Reloading and starting FastAPI service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi
             sudo systemctl restart fastapi
 
             echo "🧹 Cleaning up old backups (keeping 3 latest)..."
-            cd $BACKUP_DIR
+            cd ${BACKUP_DIR}
             ls -t pre_deploy_*.sql.gz | tail -n +4 | xargs -r rm
 
-            echo "✅ Backend deployed successfully at $(date)!"
-          EOF'
+            echo "✅ Backend deployment completed successfully!"
+          EOF

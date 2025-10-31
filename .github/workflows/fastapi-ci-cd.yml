@@ -6,30 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  upload-backend:
+  deploy-backend:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Secure Copy Backend to EC2
-        env:
-          PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          HOST: ${{ secrets.EC2_HOST }}
-          USER: ${{ secrets.EC2_USER }}
-        run: |
-          echo "$PRIVATE_KEY" > private_key.pem
-          chmod 600 private_key.pem
-          echo "📦 Copying backend folder to EC2..."
-          scp -r -o StrictHostKeyChecking=no -i private_key.pem ./ ${USER}@${HOST}:/home/${USER}/backend-temp
-
-  deploy-backend:
-    needs: upload-backend
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Deploy on EC2
+      - name: Copy and Deploy Backend to EC2
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -45,27 +29,33 @@ jobs:
         run: |
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
-          echo "🚀 Deploying backend on EC2..."
+
+          echo "📦 Uploading backend files to EC2..."
+          scp -r -o StrictHostKeyChecking=no -i private_key.pem ./ ${USER}@${HOST}:/home/${USER}/backend-temp
+
+          echo "🚀 Deploying on EC2..."
           ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} 
             set -e
+            echo "🧱 Starting backend deployment..."
 
             APP_DIR="/var/www/ats/backend"
+            TEMP_DIR="/home/${USER}/backend-temp"
 
             echo "🧹 Cleaning old backend..."
             sudo rm -rf $APP_DIR
 
             echo "📂 Moving new backend files..."
-            sudo mv /home/${USER}/backend-temp $APP_DIR
+            sudo mv $TEMP_DIR $APP_DIR
             sudo chown -R ${USER}:www-data $APP_DIR
             cd $APP_DIR
 
-            echo "🐍 Setting up virtual environment..."
+            echo "🐍 Setting up Python environment..."
             python3 -m venv venv
             source venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            echo "🔐 Creating .env file..."
+            echo "🧾 Creating .env file..."
             cat > .env << ENV
             FRONTEND_HOST="http://${HOST}"
             ENVIRONMENT="production"
@@ -78,7 +68,7 @@ jobs:
             AZURE_MAILBOX="${AZURE_MAILBOX}"
             ENV
 
-            echo "🔁 Enabling and restarting FastAPI service..."
+            echo "🔁 Reloading and restarting FastAPI service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi
             sudo systemctl restart fastapi

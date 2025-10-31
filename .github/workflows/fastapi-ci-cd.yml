@@ -74,7 +74,7 @@ jobs:
               AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
               AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
               AZURE_MAILBOX="${AZURE_MAILBOX}"
-              EOF
+              EOF'
 
             echo "⚙️ Setting up FastAPI systemd service..."
             sudo tee /etc/systemd/system/fastapi.service > /dev/null <<SERVICE
@@ -94,7 +94,7 @@ jobs:
               
               [Install]
               WantedBy=multi-user.target
-              SERVICE
+              SERVICE'
 
             echo "🔁 Enabling and restarting FastAPI service..."
             sudo systemctl daemon-reload
@@ -106,4 +106,4 @@ jobs:
             ls -t pre_deploy_*.sql.gz | tail -n +4 | xargs -r rm
 
             echo "✅ Backend deployed successfully at $(date)!"
-          EOF
+          EOF'

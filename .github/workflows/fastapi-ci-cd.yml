@@ -1,4 +1,4 @@
-name: FastAPI Backend Deployment
+name: ATS Backend Deployment
 
 on:
   push:
@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy Backend to EC2
+      - name: 🔑 Deploy backend to EC2
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -30,45 +30,50 @@ jobs:
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
 
-          echo "📦 Copying backend files to EC2..."
-          scp -i private_key.pem -o StrictHostKeyChecking=no -r ./ ${USER}@${HOST}:/tmp/backend-temp
+          echo "📦 Compressing backend files for transfer..."
+          tar -czf backend.tar.gz ./*
 
+          echo "📤 Copying files to EC2..."
+          scp -i private_key.pem -o StrictHostKeyChecking=no backend.tar.gz ${USER}@${HOST}:/tmp/
+
+          echo "🚀 Connecting to EC2 and deploying..."
           ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} << 'EOF'
             set -e
-            echo "🚀 Starting backend deployment..."
-
             APP_DIR="/var/www/ats/backend"
             BACKUP_DIR="/var/www/ats-backups/backend"
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-            echo "📁 Ensuring backup directory exists..."
+            echo "🧱 Creating backup directory..."
             sudo mkdir -p ${BACKUP_DIR}
 
+            echo "📂 Creating code backup..."
             if [ -d "${APP_DIR}" ]; then
-              echo "🗂 Backing up current version..."
               sudo tar -czf ${BACKUP_DIR}/backend_backup_${TIMESTAMP}.tar.gz -C /var/www/ats backend
+              echo "✅ Backup created at ${BACKUP_DIR}/backend_backup_${TIMESTAMP}.tar.gz"
+            else
+              echo "⚠️ No existing backend folder, skipping backup..."
             fi
 
             echo "📂 Cleaning old backups (keeping 3 latest)..."
             cd ${BACKUP_DIR}
             ls -t backend_backup_*.tar.gz | tail -n +4 | xargs -r rm || true
 
-            echo "🔄 Updating backend code..."
+            echo "🔄 Deploying new backend code..."
             sudo rm -rf ${APP_DIR}
-            sudo mv /tmp/backend-temp ${APP_DIR}
-            cd ${APP_DIR}
+            sudo mkdir -p ${APP_DIR}
+            sudo tar -xzf /tmp/backend.tar.gz -C ${APP_DIR}
+            sudo rm -f /tmp/backend.tar.gz
 
-            echo "🐍 Setting up Python virtual environment..."
+            echo "🐍 Setting up virtual environment..."
+            cd ${APP_DIR}
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
             source venv/bin/activate
-
-            echo "📦 Installing dependencies..."
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            echo "⚙️ Creating .env file..."
+            echo "🧩 Creating .env file..."
             cat > .env << ENV
             FRONTEND_HOST="http://${HOST}"
             ENVIRONMENT="production"
@@ -81,9 +86,9 @@ jobs:
             AZURE_MAILBOX="${AZURE_MAILBOX}"
             ENV
 
-            echo "🔁 Reloading and restarting FastAPI service..."
+            echo "🔁 Restarting FastAPI systemd service..."
             sudo systemctl daemon-reload
             sudo systemctl restart fastapi
 
-            echo "✅ Backend deployment completed successfully!"
+            echo "✅ Backend deployed successfully at $(date)!"
           EOF

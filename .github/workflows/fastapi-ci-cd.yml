@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Secure Copy Backend to EC2
+      - name: Copy Backend Code to EC2 (excluding .git)
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -21,8 +21,12 @@ jobs:
         run: |
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
-          echo "📦 Copying backend folder to EC2..."
-          scp -r -o StrictHostKeyChecking=no -i private_key.pem ./ ${USER}@${HOST}:/home/${USER}/backend-temp
+
+          echo "📦 Copying backend files to EC2 (skipping .git & .github)..."
+          rsync -avz --exclude '.git' --exclude '.github' --exclude '.venv' \
+            -e "ssh -o StrictHostKeyChecking=no -i private_key.pem" ./ ${USER}@${HOST}:/home/${USER}/backend-temp
+          
+          echo "✅ Files uploaded successfully."
 
   deploy-backend:
     needs: upload-backend
@@ -45,21 +49,22 @@ jobs:
         run: |
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
-          echo "🚀 Deploying backend on EC2..."
+
+          echo "🚀 Connecting to EC2 to deploy backend..."
           ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} '
             set -e
-
             APP_DIR="/var/www/ats/backend"
 
-            echo "🧹 Cleaning old backend..."
+            echo "🧹 Cleaning old backend files..."
             sudo rm -rf $APP_DIR
+            sudo mkdir -p $APP_DIR
 
-            echo "📂 Moving new backend files..."
-            sudo mv /home/${USER}/backend-temp $APP_DIR
+            echo "📂 Moving uploaded files into place..."
+            sudo mv /home/${USER}/backend-temp/* $APP_DIR/
             sudo chown -R ${USER}:www-data $APP_DIR
             cd $APP_DIR
 
-            echo "🐍 Setting up virtual environment..."
+            echo "🐍 Creating virtual environment..."
             python3 -m venv venv
             source venv/bin/activate
             pip install --upgrade pip
@@ -78,10 +83,10 @@ jobs:
             AZURE_MAILBOX="${AZURE_MAILBOX}"
             ENV
 
-            echo "🔁 Enabling and restarting FastAPI service..."
+            echo "🔁 Reloading and starting FastAPI service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi
             sudo systemctl restart fastapi
 
-            echo "✅ Backend deployed successfully!"
+            echo "✅ Backend deployment complete!"
           '

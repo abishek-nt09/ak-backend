@@ -39,7 +39,7 @@ jobs:
             cd $APP_DIR
 
             echo "🔐 Creating .env file dynamically..."
-            cat > .env <<EOF
+            cat > .env << 'EOF'
             FRONTEND_HOST="http://${{ secrets.EC2_HOST }}"
             ENVIRONMENT="production"
             BACKEND_CORS_ORIGINS="http://${{ secrets.EC2_HOST }}"
@@ -64,7 +64,7 @@ jobs:
               pip install --no-cache-dir -r requirements.txt --quiet
             fi
 
-            echo "⚙️ Running Alembic migrations if available..."
+            echo "⚙️ Running Alembic migrations (if exists)..."
             if [ -d "alembic" ]; then
               alembic upgrade head || echo "No migrations found."
             fi

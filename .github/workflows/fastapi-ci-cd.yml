@@ -1,4 +1,4 @@
-name: ATS Backend Deployment
+name: Deploy Backend
 
 on:
   push:
@@ -6,15 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  upload-code:
-    name: 📤 Upload Backend Code to EC2
+  deploy-backend:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Upload backend folder to EC2
+      - name: Upload Backend Files to EC2
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -22,20 +21,10 @@ jobs:
         run: |
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
+          echo "📤 Copying backend files to EC2..."
+          scp -o StrictHostKeyChecking=no -i private_key.pem -r . ${USER}@${HOST}:/home/${USER}/backend-temp
 
-          echo "📦 Compressing backend files..."
-          tar -czf backend.tar.gz -C backend .
-
-          echo "📤 Transferring files to EC2..."
-          scp -o StrictHostKeyChecking=no -i private_key.pem backend.tar.gz ${USER}@${HOST}:/home/${USER}/backend.tar.gz
-
-  deploy-backend:
-    name: 🚀 Deploy Backend
-    needs: upload-code
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Deploy on EC2
+      - name: Deploy and Start Backend
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -52,38 +41,38 @@ jobs:
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
 
-          ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} "
+          echo "🚀 Connecting to EC2 and deploying backend..."
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} '
             set -e
-            echo '🚀 Deploying backend...'
-            sudo mkdir -p /var/www/ats/backend
-            sudo rm -rf /var/www/ats/backend/*
-            sudo tar -xzf /home/${USER}/backend.tar.gz -C /var/www/ats/backend
+            APP_DIR="/var/www/ats/backend"
 
-            cd /var/www/ats/backend
+            echo "🧹 Cleaning old backend and moving new files..."
+            sudo rm -rf $APP_DIR
+            sudo mv ~/backend-temp $APP_DIR
+            cd $APP_DIR
 
-            echo '🐍 Creating virtual environment...'
+            echo "⚙️ Creating virtual environment and installing dependencies..."
             python3 -m venv venv
             source venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            echo '🧾 Creating .env file...'
-            cat <<EOT | sudo tee /var/www/ats/backend/.env > /dev/null
-            FRONTEND_HOST=\"http://${HOST}\"
-            ENVIRONMENT=\"production\"
-            BACKEND_CORS_ORIGINS=\"http://${HOST}\"
-            SECRET_KEY=\"${SECRET_KEY}\"
-            DATABASE_URL=\"postgresql://${DB_USER}:${DB_PASS}@localhost/${DB_NAME}\"
-            AZURE_TENANT_ID=\"${AZURE_TENANT_ID}\"
-            AZURE_CLIENT_ID=\"${AZURE_CLIENT_ID}\"
-            AZURE_CLIENT_SECRET=\"${AZURE_CLIENT_SECRET}\"
-            AZURE_MAILBOX=\"${AZURE_MAILBOX}\"
-            EOT
+            echo "🔐 Creating .env file..."
+            cat > .env << ENV
+            FRONTEND_HOST="http://${HOST}"
+            ENVIRONMENT="production"
+            BACKEND_CORS_ORIGINS="http://${HOST}"
+            SECRET_KEY="${SECRET_KEY}"
+            DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost/${DB_NAME}"
+            AZURE_TENANT_ID="${AZURE_TENANT_ID}"
+            AZURE_CLIENT_ID="${AZURE_CLIENT_ID}"
+            AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}"
+            AZURE_MAILBOX="${AZURE_MAILBOX}"
+            ENV
 
-            echo '🔁 Reloading and enabling FastAPI systemd service...'
+            echo "🔁 Reloading and starting FastAPI service..."
             sudo systemctl daemon-reload
-            sudo systemctl enable fastapi
             sudo systemctl restart fastapi
 
-            echo '✅ Backend deployment successful.'
-          "
+            echo "✅ Backend deployed successfully!"
+          '

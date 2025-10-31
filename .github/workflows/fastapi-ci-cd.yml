@@ -32,7 +32,6 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |
-            bash -s <<'EOF'
             set -e
             echo "🚀 Starting backend deployment..."
 
@@ -40,19 +39,18 @@ jobs:
             cd $APP_DIR
 
             echo "🔐 Creating .env file dynamically..."
-            cat <<EOT > .env
-            FRONTEND_HOST="http://${{ secrets.EC2_HOST }}"
-            ENVIRONMENT="production"
-            BACKEND_CORS_ORIGINS="http://${{ secrets.EC2_HOST }}"
-            SECRET_KEY="${{ secrets.SECRET_KEY }}"
-            DATABASE_URL="postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASS }}@localhost/${{ secrets.DB_NAME }}"
-            AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}"
-            AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}"
-            AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}"
-            AZURE_MAILBOX="${{ secrets.AZURE_MAILBOX }}"
-            EOT
+            echo "FRONTEND_HOST=\"http://${{ secrets.EC2_HOST }}\"" > .env
+            echo "ENVIRONMENT=\"production\"" >> .env
+            echo "BACKEND_CORS_ORIGINS=\"http://${{ secrets.EC2_HOST }}\"" >> .env
+            echo "SECRET_KEY=\"${{ secrets.SECRET_KEY }}\"" >> .env
+            echo "DATABASE_URL=\"postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASS }}@localhost/${{ secrets.DB_NAME }}\"" >> .env
+            echo "AZURE_TENANT_ID=\"${{ secrets.AZURE_TENANT_ID }}\"" >> .env
+            echo "AZURE_CLIENT_ID=\"${{ secrets.AZURE_CLIENT_ID }}\"" >> .env
+            echo "AZURE_CLIENT_SECRET=\"${{ secrets.AZURE_CLIENT_SECRET }}\"" >> .env
+            echo "AZURE_MAILBOX=\"${{ secrets.AZURE_MAILBOX }}\"" >> .env
 
             echo "✅ .env created successfully!"
+            cat .env
 
             echo "🐍 Setting up Python virtual environment..."
             if [ ! -d "venv" ]; then
@@ -73,4 +71,3 @@ jobs:
             sudo systemctl restart fastapi
 
             echo "✅ Backend deployed successfully!"
-            EOF

@@ -32,6 +32,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |
+            bash -s <<'EOF'
             set -e
             echo "🚀 Starting backend deployment..."
 
@@ -39,7 +40,7 @@ jobs:
             cd $APP_DIR
 
             echo "🔐 Creating .env file dynamically..."
-            cat > .env << 'EOF'
+            cat <<EOT > .env
             FRONTEND_HOST="http://${{ secrets.EC2_HOST }}"
             ENVIRONMENT="production"
             BACKEND_CORS_ORIGINS="http://${{ secrets.EC2_HOST }}"
@@ -49,7 +50,9 @@ jobs:
             AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}"
             AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}"
             AZURE_MAILBOX="${{ secrets.AZURE_MAILBOX }}"
-            EOF
+            EOT
+
+            echo "✅ .env created successfully!"
 
             echo "🐍 Setting up Python virtual environment..."
             if [ ! -d "venv" ]; then
@@ -64,14 +67,10 @@ jobs:
               pip install --no-cache-dir -r requirements.txt --quiet
             fi
 
-            echo "⚙️ Running Alembic migrations (if exists)..."
-            if [ -d "alembic" ]; then
-              alembic upgrade head || echo "No migrations found."
-            fi
-
             echo "🔁 Reloading and restarting FastAPI service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi
             sudo systemctl restart fastapi
 
             echo "✅ Backend deployed successfully!"
+            EOF

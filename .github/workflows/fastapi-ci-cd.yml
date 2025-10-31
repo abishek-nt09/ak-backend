@@ -30,6 +30,9 @@ jobs:
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
 
+          echo "📦 Copying backend files to EC2..."
+          scp -i private_key.pem -o StrictHostKeyChecking=no -r ./ ${USER}@${HOST}:/tmp/backend-temp
+
           ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} << 'EOF'
             set -e
             echo "🚀 Starting backend deployment..."
@@ -38,18 +41,22 @@ jobs:
             BACKUP_DIR="/var/www/ats-backups/backend"
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-            echo "🧠 Taking pre-deployment database backup..."
-            export PGPASSWORD="${DB_PASS}"
-            sudo -u postgres pg_dump -U ${DB_USER} -h localhost ${DB_NAME} | gzip > ${BACKUP_DIR}/pre_deploy_${TIMESTAMP}.sql.gz
+            echo "📁 Ensuring backup directory exists..."
+            sudo mkdir -p ${BACKUP_DIR}
 
-            echo "📦 Pulling latest backend code..."
-            if [ ! -d "${APP_DIR}/.git" ]; then
-              sudo rm -rf ${APP_DIR}
-              git clone https://github.com/abishek-nt09/ak-backend.git ${APP_DIR}
+            if [ -d "${APP_DIR}" ]; then
+              echo "🗂 Backing up current version..."
+              sudo tar -czf ${BACKUP_DIR}/backend_backup_${TIMESTAMP}.tar.gz -C /var/www/ats backend
             fi
+
+            echo "📂 Cleaning old backups (keeping 3 latest)..."
+            cd ${BACKUP_DIR}
+            ls -t backend_backup_*.tar.gz | tail -n +4 | xargs -r rm || true
+
+            echo "🔄 Updating backend code..."
+            sudo rm -rf ${APP_DIR}
+            sudo mv /tmp/backend-temp ${APP_DIR}
             cd ${APP_DIR}
-            git reset --hard
-            git pull origin main
 
             echo "🐍 Setting up Python virtual environment..."
             if [ ! -d "venv" ]; then
@@ -74,14 +81,9 @@ jobs:
             AZURE_MAILBOX="${AZURE_MAILBOX}"
             ENV
 
-            echo "🔄 Reloading and starting FastAPI service..."
+            echo "🔁 Reloading and restarting FastAPI service..."
             sudo systemctl daemon-reload
-            sudo systemctl enable fastapi
             sudo systemctl restart fastapi
-
-            echo "🧹 Cleaning up old backups (keeping 3 latest)..."
-            cd ${BACKUP_DIR}
-            ls -t pre_deploy_*.sql.gz | tail -n +4 | xargs -r rm
 
             echo "✅ Backend deployment completed successfully!"
           EOF
